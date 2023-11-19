@@ -7,6 +7,7 @@
 #include "code.h"
 #include "gen_code.h"
 #include "literal_table.h"
+#include "regname.h"
 
 void gen_code_initialize() 
 {
@@ -173,7 +174,10 @@ code_seq gen_code_read_stmt(read_stmt_t stmt)
 
 code_seq gen_code_write_stmt(write_stmt_t stmt)
 {
-    
+    code_seq ret = gen_code_expr(stmt.expr);
+    ret = code_seq_concat(ret, code_pop_stack_into_reg(A0));
+    ret = code_seq_add_to_end(ret, code_pint());
+    return ret; 
 }
 
 code_seq gen_code_skip_stmt(skip_stmt_t stmt)
