@@ -15,19 +15,24 @@ void gen_code_initialize()
 
 void gen_code_output_program(BOFFILE bf, code_seq main_seq)
 {
-    
+    // BOFHeader bfh = gen_code_program_header(main_cs);
+    // bof_write_header(bf, bfh);
+    gen_code_output_seq(bf, main_seq);
+    // gen_code_output_literals(bf);
+    bof_close(bf);
 }
 
 void gen_code_program(BOFFILE bf, block_t prog)
 {
     code_seq main_seq;
-    main_seq = gen_code_var_decls(prog.var_decls);
+    // main_seq = gen_code_var_decls(prog.var_decls);
 
     int var_num_bytes = (code_seq_size(main_seq) / 2) * BYTES_PER_WORD;
 
-    main_seq = code_seq_concat(main_seq, code_save_registers_for_AR());
-    main_seq = code_seq_concat(main_seq, code_restore_registers_from_AR());
-    main_seq = code_seq_concat(main_seq, code_deallocate_stack_space(var_num_bytes));
+    // main_seq = code_seq_concat(main_seq, code_save_registers_for_AR());
+    main_cs = code_seq_concat(main_cs, gen_code_stmt(prog.stmt));
+    // main_seq = code_seq_concat(main_seq, code_restore_registers_from_AR());
+    // main_seq = code_seq_concat(main_seq, code_deallocate_stack_space(var_num_bytes));
     main_seq = code_seq_add_to_end(main_seq, code_exit());
     gen_code_output_program(bf, main_seq);
 }
@@ -135,7 +140,20 @@ code_seq gen_code_call_stmt(call_stmt_t stmt)
 
 code_seq gen_code_begin_stmt(begin_stmt_t stmt)
 {
+    code_seq block_seq;
+    // allocate space and initialize any variables in block
+    // block_seq = gen_code_var_decls(stmt.var_decls);
+    int vars_len_in_bytes = (code_seq_size(block_seq) / 2) * BYTES_PER_WORD;
+    /*
+    ret = code_seq_add_to_end(ret, code_add(0, FP, A0));
+    ret = code_seq_concat(ret, code_save_registers_for_AR());
+    ret = code_seq_concat(ret, gen_code_stmts(stmt.stmts));
+    ret = code_seq_concat(ret, code_restore_registers_from_AR());
+    ret = code_seq_concat(ret, code_deallocate_stack_space(vars_len_in_bytes));
+    */
 
+    gen_code_stmts(stmt.stmts);
+    return block_seq;
 }
 
 code_seq gen_code_if_stmt(if_stmt_t stmt)
@@ -155,7 +173,7 @@ code_seq gen_code_read_stmt(read_stmt_t stmt)
 
 code_seq gen_code_write_stmt(write_stmt_t stmt)
 {
-
+    
 }
 
 code_seq gen_code_skip_stmt(skip_stmt_t stmt)
