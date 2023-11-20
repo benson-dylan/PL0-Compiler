@@ -15,6 +15,16 @@ void gen_code_initialize()
     literal_table_initialize();
 }
 
+static void gen_code_output_seq(BOFFILE bf, code_seq cs)
+{
+    while (!code_seq_is_empty(cs)) 
+    {
+        bin_instr_t inst = code_seq_first(cs)->instr;
+        instruction_write_bin_instr(bf, inst);
+        cs = code_seq_rest(cs);
+    }
+}
+
 void gen_code_output_program(BOFFILE bf, code_seq main_seq)
 {
     // BOFHeader bfh = gen_code_program_header(main_cs);
@@ -27,14 +37,14 @@ void gen_code_output_program(BOFFILE bf, code_seq main_seq)
 void gen_code_program(BOFFILE bf, block_t prog)
 {
     code_seq main_seq;
-    // main_seq = gen_code_var_decls(prog.var_decls);
+    main_seq = gen_code_var_decls(prog.var_decls);
 
     int var_num_bytes = (code_seq_size(main_seq) / 2) * BYTES_PER_WORD;
 
-    // main_seq = code_seq_concat(main_seq, code_save_registers_for_AR());
+    main_seq = code_seq_concat(main_seq, code_save_registers_for_AR());
     main_seq = code_seq_concat(main_seq, gen_code_stmt(prog.stmt));
-    // main_seq = code_seq_concat(main_seq, code_restore_registers_from_AR());
-    // main_seq = code_seq_concat(main_seq, code_deallocate_stack_space(var_num_bytes));
+    main_seq = code_seq_concat(main_seq, code_restore_registers_from_AR());
+    main_seq = code_seq_concat(main_seq, code_deallocate_stack_space(var_num_bytes));
     main_seq = code_seq_add_to_end(main_seq, code_exit());
     gen_code_output_program(bf, main_seq);
 }
@@ -146,12 +156,25 @@ code_seq gen_code_stmt(stmt_t stmt)
     return code_seq_empty();
 }
 
+code_seq gen_code_stmts(stmts_t stmts)
+{
+    code_seq ret = code_seq_empty();
+    stmt_t *sp = stmts.stmts;
+    while (sp != NULL) 
+    {
+        ret = code_seq_concat(ret, gen_code_stmt(*sp));
+        sp = sp->next;
+    }
+    return ret;
+}
+
 code_seq gen_code_assign_stmt(assign_stmt_t stmt)
 {
     code_seq ret;
 
     ret = gen_code_expr(*(stmt.expr));
 
+    return ret;
 }
 
 code_seq gen_code_call_stmt(call_stmt_t stmt)
@@ -161,20 +184,10 @@ code_seq gen_code_call_stmt(call_stmt_t stmt)
 
 code_seq gen_code_begin_stmt(begin_stmt_t stmt)
 {
-    code_seq block_seq;
+    code_seq ret = code_seq_empty(); 
     // allocate space and initialize any variables in block
-    // block_seq = gen_code_var_decls(stmt.var_decls);
-    int vars_len_in_bytes = (code_seq_size(block_seq) / 2) * BYTES_PER_WORD;
-    /*
-    ret = code_seq_add_to_end(ret, code_add(0, FP, A0));
-    ret = code_seq_concat(ret, code_save_registers_for_AR());
     ret = code_seq_concat(ret, gen_code_stmts(stmt.stmts));
-    ret = code_seq_concat(ret, code_restore_registers_from_AR());
-    ret = code_seq_concat(ret, code_deallocate_stack_space(vars_len_in_bytes));
-    */
-
-    gen_code_stmts(stmt.stmts);
-    return block_seq;
+    return ret;
 }
 
 code_seq gen_code_if_stmt(if_stmt_t stmt)
@@ -305,14 +318,6 @@ code_seq gen_code_expr(expr_t exp)
     return code_seq_empty();
 }
 
-code_seq gen_code_binary_op_expr(binary_op_expr_t exp)
-{
-    code_seq ret = gen_code_expr(*(exp.expr1));
-    ret = code_seq_concat(ret, gen_code_expr(*(exp.expr2)));
-    ret = code_seq_concat(ret, gen_code_op(exp.arith_op));
-    return ret;
-}
-
 code_seq gen_code_op(token_t op)
 {
     switch (op.code)
@@ -334,6 +339,14 @@ code_seq gen_code_op(token_t op)
     return code_seq_empty();
 }
 
+code_seq gen_code_binary_op_expr(binary_op_expr_t exp)
+{
+    code_seq ret = gen_code_expr(*(exp.expr1));
+    ret = code_seq_concat(ret, gen_code_expr(*(exp.expr2)));
+    ret = code_seq_concat(ret, gen_code_op(exp.arith_op));
+    return ret;
+}
+
 code_seq gen_code_arith_op(token_t arith_op)
 {
     code_seq ret = code_pop_stack_into_reg(V0);
@@ -349,10 +362,10 @@ code_seq gen_code_arith_op(token_t arith_op)
             do_op = code_seq_add_to_end(do_op, code_sub(V0, AT, V0));
             break;
         case multsym:
-            do_op = code_seq_add_to_end(do_op, code_mul(V0, AT, V0));
+            do_op = code_seq_add_to_end(do_op, code_mul(V0, AT));
             break;
         case divsym:
-            do_op = code_seq_add_to_end(do_op, code_div(V0, AT, V0));
+            do_op = code_seq_add_to_end(do_op, code_div(V0, AT));
             break;
         default:
             bail_with_error("Unexpected arithOp (%d) in gen_code_arith_op",
