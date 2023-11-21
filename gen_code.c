@@ -229,7 +229,16 @@ code_seq gen_code_if_stmt(if_stmt_t stmt)
 
 code_seq gen_code_while_stmt(while_stmt_t stmt)
 {
+    code_seq ret = gen_code_condition(stmt.condition);
+    ret = code_seq_concat(ret, code_pop_stack_into_reg(V0));
 
+    code_seq wbody = gen_code_stmt(*(stmt.body));
+    int stmt_len = code_seq_size(wbody);
+    code_seq jump = code_jmp(stmt.body->file_loc->line);
+    int jump_len = code_seq_size(jump);
+    ret = code_seq_concat(ret, code_beq(V0, 0, stmt_len + jump_len));
+    ret = code_seq_concat(ret, wbody);
+    return code_seq_concat(ret, jump);
 }
 
 code_seq gen_code_read_stmt(read_stmt_t stmt)
@@ -273,14 +282,21 @@ code_seq gen_code_condition(condition_t cond)
 
 code_seq gen_code_odd_condition(odd_condition_t cond)
 {
-
+    code_seq ret = gen_code_expr(cond.expr);
+    ret = code_seq_concat(ret, code_pop_stack_into_reg(AT));
+    ret = code_seq_add_to_end(ret, code_andi(AT, AT, 1));
+    ret = code_seq_add_to_end(ret, code_add(0, 0, AT)); // Put false in V0
+    ret = code_seq_add_to_end(ret, code_beq(0, 0, 1)); // Skip next instr
+    ret = code_seq_add_to_end(ret, code_addi(0, AT, 1)); // Put true in V0
+    ret = code_seq_concat(ret, code_push_reg_on_stack(AT));
+    return ret;
 }
 
 code_seq gen_code_rel_op_condition(rel_op_condition_t cond)
 {
     code_seq ret = gen_code_expr(cond.expr1);
-    ret = code_seq_concat(ret, gen_code_rel_op(cond.rel_op));
     ret = code_seq_concat(ret, gen_code_expr(cond.expr2));
+    ret = code_seq_concat(ret, gen_code_rel_op(cond.rel_op));
     return ret;
 }
 
@@ -320,10 +336,10 @@ code_seq gen_code_rel_op(token_t rel_op)
 	        break;
     }
     ret = code_seq_concat(ret, do_op);
-    ret = code_seq_add_to_end(ret, code_add(0, 0, V0)); // Put false in AT
+    ret = code_seq_add_to_end(ret, code_add(0, 0, AT)); // Put false in V0
     ret = code_seq_add_to_end(ret, code_beq(0, 0, 1)); // Skip next instr
-    ret = code_seq_add_to_end(ret, code_addi(0, V0, 1)); // Put true in AT
-    ret = code_seq_concat(ret, code_push_reg_on_stack(V0));
+    ret = code_seq_add_to_end(ret, code_addi(0, AT, 1)); // Put true in V0
+    ret = code_seq_concat(ret, code_push_reg_on_stack(AT));
     return ret;
 }
 
