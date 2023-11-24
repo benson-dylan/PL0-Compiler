@@ -81,7 +81,10 @@ void gen_code_program(BOFFILE bf, block_t prog)
 
 code_seq gen_code_block(block_t blk)
 {
-    
+    code_seq ret = gen_code_const_decls(blk.const_decls);
+    ret = code_seq_concat(ret, gen_code_var_decls(blk.var_decls));
+    ret = code_seq_concat(ret, gen_code_stmt(blk.stmt));
+    return ret;
 }
 
 code_seq gen_code_const_decls(const_decls_t cds)
@@ -248,6 +251,7 @@ code_seq gen_code_read_stmt(read_stmt_t stmt)
     ret = code_seq_concat(ret, code_compute_fp(T9, stmt.idu->levelsOutward));
     unsigned int offset_count = id_use_get_attrs(stmt.idu)->offset_count;
     ret = code_seq_add_to_end(ret, code_seq_singleton(code_sw(T9, V0, offset_count)));
+    return ret;
 }
 
 code_seq gen_code_write_stmt(write_stmt_t stmt)
