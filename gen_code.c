@@ -112,7 +112,7 @@ code_seq gen_code_const_defs(const_defs_t cdfs)
     while (cdfp != NULL)
     {
         code_seq alloc_and_init = code_seq_singleton(code_lw(GP, AT, literal_table_lookup(cdfp->number.text, cdfp->number.value)));
-        alloc_and_init = code_seq_add_to_end(alloc_and_init, code_sw(SP - , AT, 0));
+        alloc_and_init = code_seq_add_to_end(alloc_and_init, code_sw(SP, AT, 0));
         ret = code_seq_concat(ret, alloc_and_init);
         cdfp = cdfp->next;
     }
