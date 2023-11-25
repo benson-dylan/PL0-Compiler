@@ -35,7 +35,7 @@ static BOFHeader gen_code_program_header(code_seq main_cs)
     strncpy(ret.magic, "BOF", MAGIC_BUFFER_SIZE);
     ret.text_start_address = 0;
     ret.text_length = code_seq_size(main_cs) * BYTES_PER_WORD;
-    int dsa = MAX(ret.text_length, 1024);
+    int dsa = ret.text_length + BYTES_PER_WORD;
     ret.data_start_address = dsa;
     ret.data_length = literal_table_size() * BYTES_PER_WORD;
     int sba = dsa + ret.data_length + STACK_SPACE;
@@ -112,8 +112,8 @@ code_seq gen_code_const_defs(const_defs_t cdfs)
     while (cdfp != NULL)
     {
         code_seq alloc_and_init = code_seq_singleton(code_lw(GP, AT, literal_table_lookup(cdfp->number.text, cdfp->number.value)));
-        alloc_and_init = code_seq_add_to_end(alloc_and_init, code_sw(SP, AT, 0));
-        ret = code_seq_concat(alloc_and_init, ret);
+        alloc_and_init = code_seq_add_to_end(alloc_and_init, code_sw(SP - , AT, 0));
+        ret = code_seq_concat(ret, alloc_and_init);
         cdfp = cdfp->next;
     }
     return ret;
@@ -400,30 +400,32 @@ code_seq gen_code_binary_op_expr(binary_op_expr_t exp)
 
 code_seq gen_code_arith_op(token_t arith_op)
 {
-    code_seq ret = code_pop_stack_into_reg(V0);
-    ret = code_seq_concat(ret, code_pop_stack_into_reg(V0));
+    code_seq ret = code_pop_stack_into_reg(T2);
+    ret = code_seq_concat(ret, code_pop_stack_into_reg(T1));
     
     code_seq do_op = code_seq_empty();
     switch (arith_op.code)
     {
         case plussym:
-            do_op = code_seq_add_to_end(do_op, code_add(V0, AT, V0));
+            do_op = code_seq_add_to_end(do_op, code_add(T1, T2, T1));
             break;
         case minussym:
-            do_op = code_seq_add_to_end(do_op, code_sub(V0, AT, V0));
+            do_op = code_seq_add_to_end(do_op, code_sub(T1, T2, T1));
             break;
         case multsym:
-            do_op = code_seq_add_to_end(do_op, code_mul(V0, AT));
+            do_op = code_seq_add_to_end(do_op, code_mul(T1, T2));
+            do_op = code_seq_add_to_end(do_op, code_mflo(T1));
             break;
         case divsym:
-            do_op = code_seq_add_to_end(do_op, code_div(V0, AT));
+            do_op = code_seq_add_to_end(do_op, code_div(T1, T2));
+            do_op = code_seq_add_to_end(do_op, code_mflo(T1));
             break;
         default:
             bail_with_error("Unexpected arithOp (%d) in gen_code_arith_op",
 			arith_op.code);
 	        break;
     }
-    do_op = code_seq_concat(do_op, code_push_reg_on_stack(V0));
+    do_op = code_seq_concat(do_op, code_push_reg_on_stack(T1));
     return code_seq_concat(ret, do_op);
 }
 
