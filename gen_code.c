@@ -111,7 +111,8 @@ code_seq gen_code_const_defs(const_defs_t cdfs)
     const_def_t *cdfp = cdfs.const_defs;
     while (cdfp != NULL)
     {
-        code_seq alloc_and_init = code_seq_singleton(code_lw(GP, AT, literal_table_lookup(cdfp->number.text, cdfp->number.value)));
+        code_seq alloc_and_init = code_seq_singleton(code_addi(SP, SP, - BYTES_PER_WORD));
+        alloc_and_init = code_seq_add_to_end(alloc_and_init, code_lw(GP, AT, literal_table_lookup(cdfp->number.text, cdfp->number.value)));
         alloc_and_init = code_seq_add_to_end(alloc_and_init, code_sw(SP, AT, 0));
         ret = code_seq_concat(alloc_and_init, ret);
         cdfp = cdfp->next;
