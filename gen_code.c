@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "ast.h"
 #include "bof.h"
 #include "instruction.h"
@@ -10,38 +11,80 @@
 #include "regname.h"
 #include "pl0.tab.h"
 
+#define STACK_SPACE 4096
+
 void gen_code_initialize() 
 {
     literal_table_initialize();
 }
 
+static void gen_code_output_seq(BOFFILE bf, code_seq cs)
+{
+    while (!code_seq_is_empty(cs)) 
+    {
+        bin_instr_t inst = code_seq_first(cs)->instr;
+        instruction_write_bin_instr(bf, inst);
+        cs = code_seq_rest(cs);
+    }
+}
+
+// Return a header appropriate for the give code
+static BOFHeader gen_code_program_header(code_seq main_cs)
+{
+    BOFHeader ret;
+    strncpy(ret.magic, "BOF", MAGIC_BUFFER_SIZE);
+    ret.text_start_address = 0;
+    ret.text_length = code_seq_size(main_cs) * BYTES_PER_WORD;
+    int dsa = ret.text_length + BYTES_PER_WORD;
+    ret.data_start_address = dsa;
+    ret.data_length = literal_table_size() * BYTES_PER_WORD;
+    int sba = dsa + ret.data_length + STACK_SPACE;
+    ret.stack_bottom_addr = sba;
+    return ret;
+}
+
+static void gen_code_output_literals(BOFFILE bf)
+{
+    literal_table_start_iteration();
+    while (literal_table_iteration_has_next()) {
+        word_type w = literal_table_iteration_next();
+        // debug_print("Writing literal %f to BOF file\n", w);
+        bof_write_word(bf, w);
+    }
+    literal_table_end_iteration(); // not necessary
+}
+
 void gen_code_output_program(BOFFILE bf, code_seq main_seq)
 {
-    // BOFHeader bfh = gen_code_program_header(main_cs);
-    // bof_write_header(bf, bfh);
+    BOFHeader bfh = gen_code_program_header(main_seq);
+    bof_write_header(bf, bfh);
     gen_code_output_seq(bf, main_seq);
-    // gen_code_output_literals(bf);
+    gen_code_output_literals(bf);
     bof_close(bf);
 }
 
 void gen_code_program(BOFFILE bf, block_t prog)
 {
     code_seq main_seq;
-    // main_seq = gen_code_var_decls(prog.var_decls);
+    main_seq = gen_code_var_decls(prog.var_decls);
 
     int var_num_bytes = (code_seq_size(main_seq) / 2) * BYTES_PER_WORD;
 
-    // main_seq = code_seq_concat(main_seq, code_save_registers_for_AR());
+    main_seq = code_seq_concat(main_seq, gen_code_const_decls(prog.const_decls));
+    main_seq = code_seq_concat(main_seq, code_save_registers_for_AR());
     main_seq = code_seq_concat(main_seq, gen_code_stmt(prog.stmt));
-    // main_seq = code_seq_concat(main_seq, code_restore_registers_from_AR());
-    // main_seq = code_seq_concat(main_seq, code_deallocate_stack_space(var_num_bytes));
+    main_seq = code_seq_concat(main_seq, code_restore_registers_from_AR());
+    main_seq = code_seq_concat(main_seq, code_deallocate_stack_space(var_num_bytes));
     main_seq = code_seq_add_to_end(main_seq, code_exit());
     gen_code_output_program(bf, main_seq);
 }
 
 code_seq gen_code_block(block_t blk)
 {
-    
+    code_seq ret = gen_code_const_decls(blk.const_decls);
+    ret = code_seq_concat(ret, gen_code_var_decls(blk.var_decls));
+    ret = code_seq_concat(ret, gen_code_stmt(blk.stmt));
+    return ret;
 }
 
 code_seq gen_code_const_decls(const_decls_t cds)
@@ -68,16 +111,12 @@ code_seq gen_code_const_defs(const_defs_t cdfs)
     const_def_t *cdfp = cdfs.const_defs;
     while (cdfp != NULL)
     {
-        code_seq alloc_and_init = code_seq_singleton(code_addi(SP, SP, - BYTES_PER_WORD));
-        alloc_and_init = code_seq_add_to_end(alloc_and_init, code_sw(SP, 0, 0));
-        ret = code_seq_concat(alloc_and_init, ret);
+        code_seq alloc_and_init = code_seq_singleton(code_lw(GP, AT, literal_table_lookup(cdfp->number.text, cdfp->number.value)));
+        alloc_and_init = code_seq_add_to_end(alloc_and_init, code_sw(SP, AT, 0));
+        ret = code_seq_concat(ret, alloc_and_init);
         cdfp = cdfp->next;
     }
-}
-
-code_seq gen_code_const_def(const_def_t cdf)
-{
-    
+    return ret;
 }
 
 code_seq gen_code_var_decls(var_decls_t vds)
@@ -119,9 +158,6 @@ code_seq gen_code_stmt(stmt_t stmt)
         case assign_stmt:
             return gen_code_assign_stmt(stmt.data.assign_stmt);
             break;
-        case call_stmt:
-            return gen_code_call_stmt(stmt.data.call_stmt);
-            break;
         case begin_stmt:
             return gen_code_begin_stmt(stmt.data.begin_stmt);
             break;
@@ -146,50 +182,65 @@ code_seq gen_code_stmt(stmt_t stmt)
     return code_seq_empty();
 }
 
+code_seq gen_code_stmts(stmts_t stmts)
+{
+    code_seq ret = code_seq_empty();
+    stmt_t *sp = stmts.stmts;
+    while (sp != NULL) 
+    {
+        ret = code_seq_concat(ret, gen_code_stmt(*sp));
+        sp = sp->next;
+    }
+    return ret;
+}
+
 code_seq gen_code_assign_stmt(assign_stmt_t stmt)
 {
     code_seq ret;
 
     ret = gen_code_expr(*(stmt.expr));
+    ret = code_seq_concat(ret, code_pop_stack_into_reg(V0));
+    ret = code_seq_concat(ret, code_compute_fp(T9, stmt.idu->levelsOutward));
+    unsigned int offset_count = id_use_get_attrs(stmt.idu)->offset_count;
+    ret = code_seq_add_to_end(ret, code_sw(T9, V0, offset_count));
 
-}
-
-code_seq gen_code_call_stmt(call_stmt_t stmt)
-{
-
+    return ret;
 }
 
 code_seq gen_code_begin_stmt(begin_stmt_t stmt)
 {
-    code_seq block_seq;
+    code_seq ret = code_seq_empty(); 
     // allocate space and initialize any variables in block
-    // block_seq = gen_code_var_decls(stmt.var_decls);
-    int vars_len_in_bytes = (code_seq_size(block_seq) / 2) * BYTES_PER_WORD;
-    /*
-    ret = code_seq_add_to_end(ret, code_add(0, FP, A0));
-    ret = code_seq_concat(ret, code_save_registers_for_AR());
     ret = code_seq_concat(ret, gen_code_stmts(stmt.stmts));
-    ret = code_seq_concat(ret, code_restore_registers_from_AR());
-    ret = code_seq_concat(ret, code_deallocate_stack_space(vars_len_in_bytes));
-    */
-
-    gen_code_stmts(stmt.stmts);
-    return block_seq;
+    return ret;
 }
 
 code_seq gen_code_if_stmt(if_stmt_t stmt)
 {
-    code_seq ret = gen_code_expr(stmt.expr);
-    ret = code_seq_concat(ret, code_pop_stack_into_reg(V0));
-    code_seq condition = gen_code_condition(stmt.condition);
-    int cond_len = code_seq_size(condition);
-    ret = code_seq_add_to_end(ret, code_beq(V0, 0, cond_len));
-    return code_seq_concat(ret, condition);
+    code_seq ret = gen_code_condition(stmt.condition);
+
+    code_seq then_stmt = gen_code_stmt(*(stmt.then_stmt));
+    int then_len = code_seq_size(then_stmt);
+    ret = code_seq_add_to_end(ret, code_beq(V0, 0, then_len));
+    ret = code_seq_concat(ret, then_stmt);
+
+    code_seq else_stmt = gen_code_stmt(*(stmt.else_stmt));
+    int else_len = code_seq_size(else_stmt);
+    ret = code_seq_add_to_end(ret, code_bne(V0, 0, else_len));
+    return ret = code_seq_concat(ret, else_stmt);
 }
 
 code_seq gen_code_while_stmt(while_stmt_t stmt)
 {
+    code_seq ret = gen_code_condition(stmt.condition);
 
+    code_seq wbody = gen_code_stmt(*(stmt.body));
+    int stmt_len = code_seq_size(wbody);
+    code_seq jump = code_jmp(stmt.body->file_loc->line);
+    int jump_len = code_seq_size(jump);
+    ret = code_seq_concat(ret, code_beq(V0, 0, stmt_len + jump_len));
+    ret = code_seq_concat(ret, wbody);
+    return code_seq_concat(ret, jump);
 }
 
 code_seq gen_code_read_stmt(read_stmt_t stmt)
@@ -198,6 +249,7 @@ code_seq gen_code_read_stmt(read_stmt_t stmt)
     ret = code_seq_concat(ret, code_compute_fp(T9, stmt.idu->levelsOutward));
     unsigned int offset_count = id_use_get_attrs(stmt.idu)->offset_count;
     ret = code_seq_add_to_end(ret, code_seq_singleton(code_sw(T9, V0, offset_count)));
+    return ret;
 }
 
 code_seq gen_code_write_stmt(write_stmt_t stmt)
@@ -206,7 +258,7 @@ code_seq gen_code_write_stmt(write_stmt_t stmt)
     ret = code_seq_concat(ret, code_pop_stack_into_reg(A0));
     ret = code_seq_add_to_end(ret, code_pint());
     return ret; 
-}
+} 
 
 code_seq gen_code_skip_stmt(skip_stmt_t stmt)
 {
@@ -233,19 +285,28 @@ code_seq gen_code_condition(condition_t cond)
 
 code_seq gen_code_odd_condition(odd_condition_t cond)
 {
-
+    code_seq ret = gen_code_expr(cond.expr);
+    ret = code_seq_concat(ret, code_pop_stack_into_reg(AT));
+    ret = code_seq_add_to_end(ret, code_andi(AT, AT, 1));
+    ret = code_seq_add_to_end(ret, code_add(0, 0, AT)); // Put false in V0
+    ret = code_seq_add_to_end(ret, code_beq(0, 0, 1)); // Skip next instr
+    ret = code_seq_add_to_end(ret, code_addi(0, AT, 1)); // Put true in V0
+    ret = code_seq_concat(ret, code_push_reg_on_stack(AT));
+    return ret;
 }
 
 code_seq gen_code_rel_op_condition(rel_op_condition_t cond)
 {
-
+    code_seq ret = gen_code_expr(cond.expr1);
+    ret = code_seq_concat(ret, gen_code_expr(cond.expr2));
+    ret = code_seq_concat(ret, code_pop_stack_into_reg(AT));
+    ret = code_seq_concat(ret, code_pop_stack_into_reg(V0));
+    ret = code_seq_concat(ret, gen_code_rel_op(cond.rel_op));
+    return ret;
 }
 
 code_seq gen_code_rel_op(token_t rel_op)
 {
-    code_seq ret = code_pop_stack_into_reg(AT);
-    ret = code_seq_concat(ret, code_pop_stack_into_reg(V0));
-
     code_seq do_op = code_seq_empty();
     switch(rel_op.code)
     {
@@ -276,11 +337,11 @@ code_seq gen_code_rel_op(token_t rel_op)
 			rel_op.code);
 	        break;
     }
-    ret = code_seq_concat(ret, do_op);
-    ret = code_seq_add_to_end(ret, code_add(0, 0, AT));
-    ret = code_seq_add_to_end(ret, code_beq(0, 0, 1));
-    ret = code_seq_add_to_end(ret, code_addi(0, AT, 1));
-    ret = code_seq_concat(ret, code_push_reg_on_stack(AT));
+    code_seq ret = do_op;
+    ret = code_seq_add_to_end(ret, code_add(0, 0, V0)); // Put false in V0
+    ret = code_seq_add_to_end(ret, code_beq(0, 0, 1)); // Skip next instr
+    ret = code_seq_add_to_end(ret, code_addi(0, V0, 1)); // Put true in V0
+    ret = code_seq_concat(ret, code_push_reg_on_stack(V0));
     return ret;
 }
 
@@ -305,14 +366,6 @@ code_seq gen_code_expr(expr_t exp)
     return code_seq_empty();
 }
 
-code_seq gen_code_binary_op_expr(binary_op_expr_t exp)
-{
-    code_seq ret = gen_code_expr(*(exp.expr1));
-    ret = code_seq_concat(ret, gen_code_expr(*(exp.expr2)));
-    ret = code_seq_concat(ret, gen_code_op(exp.arith_op));
-    return ret;
-}
-
 code_seq gen_code_op(token_t op)
 {
     switch (op.code)
@@ -334,32 +387,42 @@ code_seq gen_code_op(token_t op)
     return code_seq_empty();
 }
 
+code_seq gen_code_binary_op_expr(binary_op_expr_t exp)
+{
+    code_seq ret = gen_code_expr(*(exp.expr1));
+    ret = code_seq_concat(ret, gen_code_expr(*(exp.expr2)));
+    ret = code_seq_concat(ret, gen_code_op(exp.arith_op));
+    return ret;
+}
+
 code_seq gen_code_arith_op(token_t arith_op)
 {
-    code_seq ret = code_pop_stack_into_reg(V0);
-    ret = code_seq_concat(ret, code_pop_stack_into_reg(V0));
+    code_seq ret = code_pop_stack_into_reg(T2);
+    ret = code_seq_concat(ret, code_pop_stack_into_reg(T1));
     
     code_seq do_op = code_seq_empty();
     switch (arith_op.code)
     {
         case plussym:
-            do_op = code_seq_add_to_end(do_op, code_add(V0, AT, V0));
+            do_op = code_seq_add_to_end(do_op, code_add(T1, T2, T1));
             break;
         case minussym:
-            do_op = code_seq_add_to_end(do_op, code_sub(V0, AT, V0));
+            do_op = code_seq_add_to_end(do_op, code_sub(T1, T2, T1));
             break;
         case multsym:
-            do_op = code_seq_add_to_end(do_op, code_mul(V0, AT, V0));
+            do_op = code_seq_add_to_end(do_op, code_mul(T1, T2));
+            do_op = code_seq_add_to_end(do_op, code_mflo(T1));
             break;
         case divsym:
-            do_op = code_seq_add_to_end(do_op, code_div(V0, AT, V0));
+            do_op = code_seq_add_to_end(do_op, code_div(T1, T2));
+            do_op = code_seq_add_to_end(do_op, code_mflo(T1));
             break;
         default:
             bail_with_error("Unexpected arithOp (%d) in gen_code_arith_op",
 			arith_op.code);
 	        break;
     }
-    do_op = code_seq_concat(do_op, code_push_reg_on_stack(V0));
+    do_op = code_seq_concat(do_op, code_push_reg_on_stack(T1));
     return code_seq_concat(ret, do_op);
 }
 
