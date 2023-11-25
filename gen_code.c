@@ -234,13 +234,18 @@ code_seq gen_code_if_stmt(if_stmt_t stmt)
 code_seq gen_code_while_stmt(while_stmt_t stmt)
 {
     code_seq ret = gen_code_condition(stmt.condition);
-
-    code_seq wbody = gen_code_stmt(*(stmt.body));
-    int stmt_len = code_seq_size(wbody);
-    code_seq jump = code_jmp(stmt.body->file_loc->line);
+    stmt_t *sp = stmt.body;
+    code_seq body = code_seq_empty();
+    while (sp != NULL)
+    {
+        body = code_seq_concat(body, gen_code_stmt(*sp));
+        sp = sp->next;
+    }
+    int body_len = code_seq_size(body);
+    code_seq jump = code_jmp(stmt.body->file_loc->line * BYTES_PER_WORD);
     int jump_len = code_seq_size(jump);
-    ret = code_seq_concat(ret, code_beq(V0, 0, stmt_len + jump_len));
-    ret = code_seq_concat(ret, wbody);
+    ret = code_seq_add_to_end(ret, code_beq(V0, 0, body_len + jump_len));
+    ret = code_seq_concat(ret, body);
     return code_seq_concat(ret, jump);
 }
 
