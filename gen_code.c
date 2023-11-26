@@ -242,7 +242,7 @@ code_seq gen_code_while_stmt(while_stmt_t stmt)
         sp = sp->next;
     }
     int body_len = code_seq_size(body);
-    code_seq jump = code_jmp(stmt.body->file_loc->line * BYTES_PER_WORD);
+    code_seq jump = code_jmp(stmt.condition.file_loc->line * BYTES_PER_WORD);
     int jump_len = code_seq_size(jump);
     ret = code_seq_add_to_end(ret, code_beq(V0, 0, body_len + jump_len));
     ret = code_seq_concat(ret, body);
@@ -292,12 +292,12 @@ code_seq gen_code_condition(condition_t cond)
 code_seq gen_code_odd_condition(odd_condition_t cond)
 {
     code_seq ret = gen_code_expr(cond.expr);
-    ret = code_seq_concat(ret, code_pop_stack_into_reg(AT));
-    ret = code_seq_add_to_end(ret, code_andi(AT, AT, 1));
-    ret = code_seq_add_to_end(ret, code_add(0, 0, AT)); // Put false in V0
+    ret = code_seq_concat(ret, code_pop_stack_into_reg(V0));
+    ret = code_seq_add_to_end(ret, code_andi(V0, V0, 1));
+    ret = code_seq_add_to_end(ret, code_add(0, 0, V0)); // Put false in V0
     ret = code_seq_add_to_end(ret, code_beq(0, 0, 1)); // Skip next instr
-    ret = code_seq_add_to_end(ret, code_addi(0, AT, 1)); // Put true in V0
-    ret = code_seq_concat(ret, code_push_reg_on_stack(AT));
+    ret = code_seq_add_to_end(ret, code_addi(0, V0, 1)); // Put true in V0
+    ret = code_seq_concat(ret, code_push_reg_on_stack(V0));
     return ret;
 }
 
