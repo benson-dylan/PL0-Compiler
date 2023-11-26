@@ -324,7 +324,7 @@ code_seq gen_code_rel_op(token_t rel_op)
             break;
         case ltsym:
             do_op = code_seq_singleton(code_sub(V0, AT, V0));
-            do_op = code_seq_add_to_end(do_op, code_bltz(V0, 2));
+	        do_op = code_seq_add_to_end(do_op, code_bltz(V0, 2));
             break;
         case leqsym:
             do_op = code_seq_singleton(code_sub(V0, AT, V0));
@@ -332,7 +332,7 @@ code_seq gen_code_rel_op(token_t rel_op)
             break;
         case gtsym:
             do_op = code_seq_singleton(code_sub(V0, AT, V0));
-	        do_op = code_seq_add_to_end(do_op, code_bgez(V0, 2));
+	        do_op = code_seq_add_to_end(do_op, code_bgtz(V0, 2));
             break;
         case geqsym:
             do_op = code_seq_singleton(code_sub(V0, AT, V0));
